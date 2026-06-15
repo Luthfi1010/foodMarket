@@ -1,70 +1,67 @@
 <?php
 /**
- * Template Name: Halaman Registrasi Custom
+ * Template Name: Halaman Register Custom
  */
 
-// 1. PROTEKSI ROUTING: Jika user sudah login, arahkan secara presisi sesuai role
-if (is_user_logged_in()) {
+// Proteksi: Jika user sudah login, langsung alihkan ke tempat yang sesuai
+if ( is_user_logged_in() ) {
     $current_user = wp_get_current_user();
-    if (in_array('administrator', $current_user->roles) || in_array('seller', $current_user->roles)) {
-        wp_redirect(home_url('/dashboard-seller/?view=tambah-produk'));
+    if ( in_array('administrator', $current_user->roles) || in_array('seller', $current_user->roles) ) {
+        wp_redirect( home_url('/dashboard-seller/?view=dashboard') );
     } else {
-        wp_redirect(home_url());
+        wp_redirect( home_url() );
     }
     exit;
 }
 
+$error_message   = '';
 $success_message = '';
-$error_message = '';
 
-// 2. PROSES FORM REGISTRASI
-if (isset($_POST['foodmarket_register_submit'])) {
-    
-    // SINKRONISASI KEAMANAN: Cek Token Nonce dengan validasi super ketat
-    if (!isset($_POST['foodmarket_reg_nonce_field']) || !wp_verify_nonce($_POST['foodmarket_reg_nonce_field'], 'foodmarket_register_action')) {
-        $error_message = 'Token keamanan kedaluwarsa. Silakan muat ulang halaman atau bersihkan cache browser Anda.';
+if ( isset( $_POST['foodmarket_register_submit'] ) ) {
+    // 1. Validasi Token Keamanan Nonce
+    if ( ! isset( $_POST['foodmarket_register_nonce_field'] ) || ! wp_verify_nonce( $_POST['foodmarket_register_nonce_field'], 'foodmarket_register_action' ) ) {
+        $error_message = 'Token keamanan kedaluwarsa. Silakan muat ulang halaman.';
     } else {
-        $username   = sanitize_user($_POST['reg_username']);
-        $email      = sanitize_email($_POST['reg_email']);
+        // 2. Sanitasi Data Input Form
+        $username   = sanitize_user( $_POST['reg_username'] );
+        $email      = sanitize_email( $_POST['reg_email'] );
         $password   = $_POST['reg_password'];
-        $fullname   = sanitize_text_field($_POST['reg_fullname']);
-        $role_input = sanitize_text_field($_POST['reg_role']); // 'buyer' atau 'seller'
+        $nama_penuh = sanitize_text_field( $_POST['reg_fullname'] );
+        $role_pilih = sanitize_text_field( $_POST['reg_role'] ); // Nilai: 'subscriber' atau 'seller'
 
-        // Kunci pilihan tipe akun agar tidak bisa di-inject role lain
-        if (!in_array($role_input, array('buyer', 'seller'))) {
-            $role_input = 'buyer'; 
-        }
-
-        // Validasi Ketersediaan Data
-        if (username_exists($username)) {
-            $error_message = 'Username sudah digunakan. Silakan pilih username lain.';
-        } elseif (email_exists($email)) {
-            $error_message = 'Email sudah terdaftar. Silakan gunakan email lain.';
-        } elseif (strlen($password) < 6) {
-            $error_message = 'Password terlalu pendek! Minimal wajib 6 karakter.';
+        // 3. Validasi Kelayakan Data
+        if ( username_exists( $username ) ) {
+            $error_message = 'Username sudah digunakan oleh orang lain.';
+        } elseif ( ! is_email( $email ) ) {
+            $error_message = 'Format alamat email tidak valid.';
+        } elseif ( email_exists( $email ) ) {
+            $error_message = 'Alamat email sudah terdaftar di sistem.';
+        } elseif ( strlen( $password ) < 6 ) {
+            $error_message = 'Password terlalu pendek. Minimal menggunakan 6 karakter.';
+        } elseif ( ! in_array( $role_pilih, array( 'subscriber', 'seller' ) ) ) {
+            $error_message = 'Pilihan tipe akun tidak valid.';
         } else {
-            // Buat user baru di WordPress
-            $user_id = wp_create_user($username, $password, $email);
+            // 4. Proses Pendaftaran User Baru ke Database WordPress
+            $user_id = wp_create_user( $username, $password, $email );
 
-            if (is_wp_error($user_id)) {
-                $error_message = 'Terjadi kesalahan saat mendaftar: ' . $user_id->get_error_message();
+            if ( is_wp_error( $user_id ) ) {
+                $error_message = 'Gagal membuat akun: ' . $user_id->get_error_message();
             } else {
-                // Update nama lengkap
-                wp_update_user(array(
+                // Set Nama Lengkap Display
+                wp_update_user( array(
                     'ID'           => $user_id,
-                    'display_name' => $fullname,
-                    'nickname'     => $fullname
-                ));
+                    'display_name' => $nama_penuh,
+                    'first_name'   => $nama_penuh
+                ) );
 
-                // Alokasikan Role
-                $user_obj = new WP_User($user_id);
-                if ($role_input === 'seller') {
-                    $user_obj->set_role('seller');
-                } else {
-                    $user_obj->set_role('subscriber'); // Subscriber bertindak sebagai Buyer
-                }
+                // 5. PENETAPAN ROLE YANG TEPAT (Isolasi Hak Akses)
+                $user_obj = new WP_User( $user_id );
+                $user_obj->set_role( $role_pilih );
 
-                $success_message = 'Registrasi berhasil! Silakan masuk menggunakan akun Anda.';
+                $success_message = 'Pendaftaran berhasil! Silakan masuk menggunakan akun baru Anda.';
+                
+                // Opsional: Otomatis login setelah daftar bisa ditaruh di sini, 
+                // namun demi keamanan alur lebih baik diarahkan untuk ketik login manual.
             }
         }
     }
@@ -74,74 +71,91 @@ get_header(); ?>
 
 <main class="max-w-md mx-auto px-4 py-12">
     <div class="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm space-y-6">
-        
+
         <div class="text-center space-y-2">
-            <h2 class="text-2xl font-black text-gray-950 tracking-tight">Daftar Akun <span class="text-brand">Baru</span></h2>
-            <p class="text-xs text-gray-500">Bergabunglah dan jelajahi surga kuliner FoodMarket.</p>
+            <h2 class="text-2xl font-black text-gray-950 tracking-tight">Daftar Akun <span class="text-brand">FoodMarket</span></h2>
+            <p class="text-xs text-gray-500">Bergabunglah untuk mulai memanjakan lidah atau mengelola tokomu sendiri.</p>
         </div>
 
-        <?php if (!empty($success_message)) : ?>
-            <div class="bg-green-50 text-green-600 text-xs p-4 rounded-xl border border-green-100 font-medium text-center space-y-2">
-                <p>✅ <?php echo esc_html($success_message); ?></p>
-                <a href="<?php echo home_url('/login'); ?>" class="block text-brand font-bold underline mt-1">Klik disini untuk Masuk</a>
-            </div>
-        <?php endif; ?>
-
-        <?php if (!empty($error_message)) : ?>
+        <?php if ( ! empty( $error_message ) ) : ?>
             <div class="bg-red-50 text-red-600 text-xs p-3.5 rounded-xl border border-red-100 font-medium text-center">
-                ❌ <?php echo $error_message; ?>
+                ❌ <?php echo esc_html( $error_message ); ?>
             </div>
         <?php endif; ?>
 
-        <?php if (empty($success_message)) : ?>
-            <form method="post" class="space-y-4">
-                
-                <?php wp_nonce_field('foodmarket_register_action', 'foodmarket_reg_nonce_field'); ?>
-                
+        <?php if ( ! empty( $success_message ) ) : ?>
+            <div class="bg-green-50 text-green-600 text-xs p-3.5 rounded-xl border border-green-100 font-medium text-center space-y-2">
+                <div>🎉 <?php echo esc_html( $success_message ); ?></div>
                 <div>
-                    <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Daftar Sebagai</label>
-                    <div class="grid grid-cols-2 gap-3">
-                        <label class="flex items-center justify-center gap-2 p-3 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50 transition">
-                            <input type="radio" name="reg_role" value="buyer" checked class="accent-brand">
-                            <span class="text-xs font-bold text-gray-800">🛍️ Buyer</span>
-                        </label>
-                        <label class="flex items-center justify-center gap-2 p-3 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50 transition">
-                            <input type="radio" name="reg_role" value="seller" class="accent-brand">
-                            <span class="text-xs font-bold text-gray-800">🧑‍🍳 Seller (Penjual)</span>
-                        </label>
-                    </div>
+                    <a href="<?php echo home_url('/login'); ?>" class="inline-block text-[11px] bg-green-600 text-white px-3 py-1 rounded-lg font-bold uppercase tracking-wider mt-1 hover:bg-green-700 transition">Ke Halaman Masuk</a>
                 </div>
-
-                <div>
-                    <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Nama Lengkap</label>
-                    <input type="text" name="reg_fullname" required class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:border-brand focus:ring-1 focus:ring-brand outline-none transition" placeholder="Masukkan nama lengkap Anda">
-                </div>
-
-                <div>
-                    <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Username</label>
-                    <input type="text" name="reg_username" required class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:border-brand focus:ring-1 focus:ring-brand outline-none transition" placeholder="Contoh: budiseller">
-                </div>
-
-                <div>
-                    <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Alamat Email</label>
-                    <input type="email" name="reg_email" required class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:border-brand focus:ring-1 focus:ring-brand outline-none transition" placeholder="budi@example.com">
-                </div>
-
-                <div>
-                    <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Password</label>
-                    <input type="password" name="reg_password" required class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:border-brand focus:ring-1 focus:ring-brand outline-none transition" placeholder="Minimal 6 karakter">
-                </div>
-
-                <button type="submit" name="foodmarket_register_submit" class="w-full bg-brand hover:bg-brand-dark text-white font-bold py-3.5 rounded-2xl transition text-sm shadow-md shadow-brand/10 mt-2">
-                    Mendaftar Sekarang
-                </button>
-            </form>
+            </div>
         <?php endif; ?>
+
+        <form method="post" class="space-y-4">
+            <?php wp_nonce_field('foodmarket_register_action', 'foodmarket_register_nonce_field'); ?>
+
+            <div>
+                <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Tipe Akun Anda</label>
+                <div class="grid grid-cols-2 gap-3">
+                    <label class="border border-gray-200 rounded-xl p-3 flex items-center gap-2.5 cursor-pointer hover:border-brand/50 transition">
+                        <input type="radio" name="reg_role" value="subscriber" checked class="accent-brand">
+                        <div class="text-left">
+                            <div class="text-xs font-bold text-gray-900">Buyer (Pembeli)</div>
+                            <div class="text-[10px] text-gray-400">Saya ingin jajan kuliner</div>
+                        </div>
+                    </label>
+                    <label class="border border-gray-200 rounded-xl p-3 flex items-center gap-2.5 cursor-pointer hover:border-brand/50 transition">
+                        <input type="radio" name="reg_role" value="seller" class="accent-brand">
+                        <div class="text-left">
+                            <div class="text-xs font-bold text-gray-900">Seller (Penjual)</div>
+                            <div class="text-[10px] text-gray-400">Saya ingin jualan makanan</div>
+                        </div>
+                    </label>
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Nama Lengkap</label>
+                <input type="text" name="reg_fullname" required value="<?php echo isset($_POST['reg_fullname']) ? esc_attr($_POST['reg_fullname']) : ''; ?>"
+                    class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:border-brand focus:ring-1 focus:ring-brand outline-none transition"
+                    placeholder="Contoh: Ahmad Subagja">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Username</label>
+                <input type="text" name="reg_username" required value="<?php echo isset($_POST['reg_username']) ? esc_attr($_POST['reg_username']) : ''; ?>"
+                    class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:border-brand focus:ring-1 focus:ring-brand outline-none transition"
+                    placeholder="Masukkan username tanpa spasi">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Alamat Email</label>
+                <input type="email" name="reg_email" required value="<?php echo isset($_POST['reg_email']) ? esc_attr($_POST['reg_email']) : ''; ?>"
+                    class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:border-brand focus:ring-1 focus:ring-brand outline-none transition"
+                    placeholder="nama@email.com">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Password</label>
+                <input type="password" name="reg_password" required
+                    class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:border-brand focus:ring-1 focus:ring-brand outline-none transition"
+                    placeholder="Minimal gunakan 6 karakter">
+            </div>
+
+            <p class="text-[11px] text-gray-400 leading-relaxed text-center pt-1">
+                Dengan mendaftar, Anda menyetujui seluruh aturan layanan operasional platform transaksi kuliner kami.
+            </p>
+
+            <button type="submit" name="foodmarket_register_submit"
+                class="w-full bg-brand hover:bg-brand-dark text-white font-bold py-3.5 rounded-2xl transition text-sm shadow-md shadow-brand/10 mt-2">
+                Daftar Akun Baru
+            </button>
+        </form>
 
         <div class="text-center border-t border-gray-50 pt-4">
-            <p class="text-xs text-gray-500">Sudah punya akun? <a href="<?php echo home_url('/login'); ?>" class="text-brand font-bold hover:underline">Masuk disini</a></p>
+            <p class="text-xs text-gray-500">Sudah memiliki akun? <a href="<?php echo home_url('/login'); ?>" class="text-brand font-bold hover:underline">Masuk di Sini</a></p>
         </div>
-
     </div>
 </main>
 
