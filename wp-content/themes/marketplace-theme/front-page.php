@@ -3,6 +3,10 @@
 <?php
 // ============================================================
 // SEARCH & FILTER LOGIC
+// FIX: Sebelumnya $produk_query dibuat 2x (sekali sebelum tax_query
+// di-attach, sekali sesudah) — query pertama sia-sia dan membingungkan.
+// Sekarang semua argumen (search, kategori, sort) dirakit dulu secara
+// lengkap, baru SATU KALI WP_Query dijalankan di akhir.
 // ============================================================
 $search_query = isset($_GET['s'])   ? sanitize_text_field($_GET['s'])   : '';
 $filter_kat   = isset($_GET['kat']) ? sanitize_text_field($_GET['kat']) : '';
@@ -16,7 +20,7 @@ $produk_args = [
     'paged'          => $paged,
 ];
 
-// Search
+// Search keyword
 if ($search_query) {
     $produk_args['s'] = $search_query;
 }
@@ -47,58 +51,52 @@ switch ($filter_sort) {
         $produk_args['order']   = 'DESC';
 }
 
+// Satu-satunya query yang dijalankan
 $produk_query = new WP_Query($produk_args);
 $is_searching = $search_query || $filter_kat || $filter_sort !== 'terbaru';
+$all_cats     = get_terms(['taxonomy' => 'kategori_makanan', 'hide_empty' => false]);
 ?>
 
 <main class="max-w-7xl mx-auto px-4 py-8 grid grid-cols-1 lg:grid-cols-4 gap-8">
 
     <!-- ===== SIDEBAR ===== -->
-    <aside class="space-y-6">
+    <aside class="space-y-4">
         <div class="bg-white p-4 rounded-2xl border border-gray-100 space-y-1">
-            <a href="<?php echo home_url(); ?>" class="flex items-center gap-3 px-3 py-2.5 rounded-xl <?php echo !$is_searching ? 'bg-brand-light text-brand font-bold' : 'text-gray-600 hover:bg-gray-50'; ?> transition text-sm">🏠 Beranda</a>
-            <a href="#kategori" class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-600 hover:bg-gray-50 transition text-sm">📂 Kategori</a>
+            <a href="<?php echo home_url(); ?>"
+                class="flex items-center gap-3 px-3 py-2.5 rounded-xl <?php echo !$is_searching ? 'bg-brand-light text-brand font-bold' : 'text-gray-600 hover:bg-gray-50'; ?> transition text-sm">
+                <i class="fa-solid fa-house" style="color: rgb(218, 109, 6);"></i> Beranda
+            </a>
+
+            <div class="relative group">
+                <button class="w-full flex items-center justify-between px-3 py-2.5 rounded-xl <?php echo $filter_kat ? 'bg-brand-light text-brand font-bold' : 'text-gray-600 hover:bg-gray-50'; ?> transition text-sm outline-none text-left">
+                    <span class="flex items-center gap-3"><i class="fa-solid fa-folder-open" style="color: rgb(218, 109, 6);"></i> Kategori</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-3 h-3 text-gray-400 group-hover:rotate-180 transition duration-200">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+                    </svg>
+                </button>
+
+                <div class="hidden group-hover:block pl-8 pr-2 py-1 space-y-1">
+                    <?php if (!empty($all_cats) && !is_wp_error($all_cats)) :
+                        foreach ($all_cats as $cat) :
+                            $is_active = ($filter_kat === $cat->slug);
+                            $url = home_url('/?kat=' . urlencode($cat->slug) . '&s=' . urlencode($search_query) . '&sort=' . $filter_sort);
+                    ?>
+                        <a href="<?php echo esc_url($url); ?>"
+                            class="block py-1.5 text-xs <?php echo $is_active ? 'text-brand font-bold' : 'text-gray-500 hover:text-brand'; ?> transition">
+                            • <?php echo esc_html($cat->name); ?> <span class="text-[10px] text-gray-400 font-normal">(<?php echo $cat->count; ?>)</span>
+                        </a>
+                    <?php endforeach; else: ?>
+                        <span class="block py-1 text-[11px] text-gray-400 italic">Belum ada kategori</span>
+                    <?php endif; ?>
+                </div>
+            </div>
+
             <?php if (is_user_logged_in()) : ?>
-                <a href="<?php echo home_url('/pesanan-saya'); ?>" class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-600 hover:bg-gray-50 transition text-sm">📋 Pesanan Saya</a>
-                <a href="<?php echo home_url('/checkout'); ?>" class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-600 hover:bg-gray-50 transition text-sm">🛒 Keranjang</a>
+                <a href="<?php echo home_url('/pesanan-saya'); ?>" class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-600 hover:bg-gray-50 transition text-sm"><i class="fa-solid fa-box-open" style="color: rgb(218, 109, 6);"></i> Pesanan Saya</a>
+                <a href="<?php echo home_url('/checkout'); ?>" class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-600 hover:bg-gray-50 transition text-sm"><i class="fa-solid fa-cart-shopping" style="color: rgb(218, 109, 6);"></i> Keranjang</a>
             <?php endif; ?>
         </div>
 
-        <!-- Filter Kategori -->
-        <div class="bg-white p-4 rounded-2xl border border-gray-100">
-            <p class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">Filter Kategori</p>
-            <?php
-            $all_cats = get_terms(['taxonomy' => 'kategori_makanan', 'hide_empty' => false]);
-            ?>
-            <a href="<?php echo home_url('/?s=' . urlencode($search_query) . '&sort=' . $filter_sort); ?>"
-                class="block px-3 py-2 rounded-xl text-xs mb-1 transition <?php echo !$filter_kat ? 'bg-brand-light text-brand font-bold' : 'text-gray-600 hover:bg-gray-50'; ?>">
-                🍽️ Semua Kategori
-            </a>
-            <?php if (!empty($all_cats) && !is_wp_error($all_cats)) :
-                foreach ($all_cats as $cat) :
-                    $emoji = '🍽️';
-                    if (strpos($cat->slug, 'makan') !== false)  $emoji = '🍱';
-                    if (strpos($cat->slug, 'minum') !== false)  $emoji = '🥤';
-                    if (strpos($cat->slug, 'cemilan') !== false || strpos($cat->slug, 'jajan') !== false) $emoji = '🍿';
-                    $url = home_url('/?kat=' . urlencode($cat->slug) . '&s=' . urlencode($search_query) . '&sort=' . $filter_sort);
-                ?>
-                    <a href="<?php echo esc_url($url); ?>"
-                        class="block px-3 py-2 rounded-xl text-xs mb-1 transition <?php echo $filter_kat === $cat->slug ? 'bg-brand-light text-brand font-bold' : 'text-gray-600 hover:bg-gray-50'; ?>">
-                        <?php echo $emoji . ' ' . esc_html($cat->name); ?>
-                        <span class="text-gray-400">(<?php echo $cat->count; ?>)</span>
-                    </a>
-                <?php endforeach;
-            else :
-                foreach (['makanan-berat' => ['🍱','Makanan Berat'], 'minuman' => ['🥤','Minuman'], 'cemilan' => ['🍿','Cemilan']] as $slug => $d) : ?>
-                    <a href="<?php echo home_url('/?kat=' . $slug); ?>"
-                        class="block px-3 py-2 rounded-xl text-xs mb-1 text-gray-600 hover:bg-gray-50 transition">
-                        <?php echo $d[0] . ' ' . $d[1]; ?>
-                    </a>
-                <?php endforeach;
-            endif; ?>
-        </div>
-
-        <?php if (!is_user_logged_in()) : ?>
         <div class="bg-brand-light p-5 rounded-2xl border border-brand/10 space-y-3">
             <h4 class="font-bold text-gray-900 text-sm">Jadi Seller</h4>
             <p class="text-xs text-gray-600">Jualan makananmu dan jangkau lebih banyak pelanggan.</p>
@@ -107,7 +105,6 @@ $is_searching = $search_query || $filter_kat || $filter_sort !== 'terbaru';
                 Daftar Sekarang
             </a>
         </div>
-        <?php endif; ?>
     </aside>
 
     <!-- ===== KONTEN UTAMA ===== -->
@@ -119,14 +116,6 @@ $is_searching = $search_query || $filter_kat || $filter_sort !== 'terbaru';
             <div class="space-y-4 max-w-md z-10">
                 <h1 class="text-3xl md:text-4xl font-extrabold text-gray-950 leading-tight">Temukan Kuliner Terbaik di Sekitarmu</h1>
                 <p class="text-sm text-gray-600">Aneka makanan lezat dari penjual terpercaya, dikirim cepat.</p>
-                <!-- Search bar di hero -->
-                <form method="GET" action="<?php echo home_url('/'); ?>" class="flex gap-2">
-                    <input type="text" name="s" placeholder="Cari nasi goreng, bakso, mie ayam..."
-                        class="flex-1 px-4 py-3 rounded-xl text-sm border border-white/50 bg-white focus:outline-none focus:ring-2 focus:ring-brand/30">
-                    <button type="submit" class="bg-brand hover:bg-brand-dark text-white font-bold px-5 py-3 rounded-xl transition shadow-md text-sm">
-                        Cari
-                    </button>
-                </form>
             </div>
             <div class="w-52 h-52 rounded-full border-4 border-white shadow-xl flex-shrink-0 bg-cover bg-center"
                 style="background-image: url('https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=500');"></div>
@@ -139,14 +128,11 @@ $is_searching = $search_query || $filter_kat || $filter_sort !== 'terbaru';
             </div>
             <div class="grid grid-cols-3 sm:grid-cols-6 gap-3">
                 <?php
-                $cats_show = (!empty($all_cats) && !is_wp_error($all_cats)) ? $all_cats : [];
-                if (empty($cats_show)) {
-                    $cats_show = [
-                        (object)['slug'=>'makanan-berat','name'=>'Makanan Berat'],
-                        (object)['slug'=>'minuman','name'=>'Minuman'],
-                        (object)['slug'=>'cemilan','name'=>'Cemilan'],
-                    ];
-                }
+                $cats_show = (!empty($all_cats) && !is_wp_error($all_cats)) ? $all_cats : [
+                    (object)['slug'=>'makanan-berat','name'=>'Makanan Berat'],
+                    (object)['slug'=>'minuman','name'=>'Minuman'],
+                    (object)['slug'=>'cemilan','name'=>'Cemilan'],
+                ];
                 foreach ($cats_show as $cat) :
                     $emoji = '🍽️';
                     if (strpos($cat->slug,'makan')!==false) $emoji='🍱';
@@ -198,7 +184,6 @@ $is_searching = $search_query || $filter_kat || $filter_sort !== 'terbaru';
                     <?php endif; ?>
                 </div>
 
-                <!-- Sort -->
                 <form method="GET" action="<?php echo home_url('/'); ?>" class="flex items-center gap-2">
                     <?php if ($search_query) : ?><input type="hidden" name="s" value="<?php echo esc_attr($search_query); ?>"><?php endif; ?>
                     <?php if ($filter_kat) : ?><input type="hidden" name="kat" value="<?php echo esc_attr($filter_kat); ?>"><?php endif; ?>
@@ -240,21 +225,14 @@ $is_searching = $search_query || $filter_kat || $filter_sort !== 'terbaru';
                         <div class="p-4 flex-1 flex flex-col justify-between space-y-3">
                             <div>
                                 <a href="<?php the_permalink(); ?>" class="block">
-                                    <h4 class="font-bold text-gray-900 text-sm group-hover:text-brand transition line-clamp-2">
-                                        <?php the_title(); ?>
-                                    </h4>
+                                    <h4 class="font-bold text-gray-900 text-sm group-hover:text-brand transition line-clamp-2"><?php the_title(); ?></h4>
                                 </a>
                                 <p class="text-xs text-gray-400 mt-0.5">🏪 <?php the_author(); ?></p>
                             </div>
                             <div class="flex items-center justify-between pt-2 border-t border-gray-50">
-                                <span class="text-sm font-bold text-brand">
-                                    <?php echo $harga ? 'Rp' . number_format($harga, 0, ',', '.') : 'Rp0'; ?>
-                                </span>
+                                <span class="text-sm font-bold text-brand"><?php echo $harga ? 'Rp' . number_format($harga, 0, ',', '.') : 'Rp0'; ?></span>
                                 <?php if (!$habis) : ?>
-                                    <a href="<?php the_permalink(); ?>"
-                                        class="text-[10px] bg-brand/10 text-brand hover:bg-brand hover:text-white font-bold px-3 py-1.5 rounded-xl transition">
-                                        + Pesan
-                                    </a>
+                                    <a href="<?php the_permalink(); ?>" class="text-[10px] bg-brand/10 text-brand hover:bg-brand hover:text-white font-bold px-3 py-1.5 rounded-xl transition">+ Pesan</a>
                                 <?php else : ?>
                                     <span class="text-[10px] text-gray-400 font-medium">Habis</span>
                                 <?php endif; ?>
@@ -275,7 +253,6 @@ $is_searching = $search_query || $filter_kat || $filter_sort !== 'terbaru';
                 <?php endif; ?>
             </div>
 
-            <!-- Pagination -->
             <?php if ($produk_query->max_num_pages > 1) : ?>
                 <div class="pt-4 flex justify-center">
                     <?php echo paginate_links([

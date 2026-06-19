@@ -6,7 +6,7 @@
 // FIX: Redirect ke ?view=dashboard bukan ?view=tambah-produk
 if ( is_user_logged_in() ) {
     $current_user = wp_get_current_user();
-    if ( in_array('administrator', $current_user->roles) || in_array('seller', $current_user->roles) ) {
+    if (in_array('seller', $current_user->roles) ) {
         wp_redirect( home_url('/dashboard-seller/?view=dashboard') );
     } else {
         wp_redirect( home_url() );
@@ -33,7 +33,7 @@ if ( isset( $_POST['foodmarket_login_submit'] ) ) {
             $error_message = 'Username atau password salah. Silakan coba lagi.';
         } else {
             // FIX: redirect ke ?view=dashboard
-            if ( in_array('administrator', $user->roles) || in_array('seller', $user->roles) ) {
+            if (in_array('seller', $user->roles) ) {
                 wp_redirect( home_url('/dashboard-seller/?view=dashboard') );
             } else {
                 wp_redirect( home_url() );

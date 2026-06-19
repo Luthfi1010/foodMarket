@@ -183,9 +183,9 @@ get_header();
             </div>
         <?php endif; ?>
 
-            <button onclick="window.history.back()" class="inline-block bg-gray-200 hover:bg-gray-300 text-gray-800 text-xs font-bold px-5 py-2.5 rounded-xl transition">
+            <a href="<?php echo home_url('/'); ?>" class="inline-block bg-gray-200 hover:bg-gray-300 text-gray-800 text-xs font-bold px-5 py-2.5 rounded-xl transition">
                 Kembali
-            </button>
+            </a>
     </div>
 
 </main>

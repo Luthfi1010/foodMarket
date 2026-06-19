@@ -35,7 +35,7 @@ function foodmarket_theme_setup() {
 }
 
 // ============================================================
-// 3. REGISTER ROLE SELLER (Hanya saat tema pertama diaktifkan)
+// 3. REGISTER ROLE SELLER
 // ============================================================
 add_action( 'after_switch_theme', 'foodmarket_register_seller_role' );
 function foodmarket_register_seller_role() {
@@ -52,7 +52,7 @@ add_filter( 'login_redirect', 'foodmarket_custom_login_redirect', 10, 3 );
 function foodmarket_custom_login_redirect( $redirect_to, $request, $user ) {
     if ( isset( $user->roles ) && is_array( $user->roles ) ) {
         if ( in_array( 'administrator', $user->roles ) || in_array( 'seller', $user->roles ) ) {
-            return home_url( '/dashboard-seller/?view=produk' );
+            return home_url( '/dashboard-seller/?view=dashboard' );
         }
         return home_url();
     }
@@ -61,7 +61,6 @@ function foodmarket_custom_login_redirect( $redirect_to, $request, $user ) {
 
 // ============================================================
 // 5. SESSION START
-// Harus sebelum handler lain agar $_SESSION tersedia
 // ============================================================
 add_action( 'init', 'foodmarket_start_session', 1 );
 function foodmarket_start_session() {
@@ -71,10 +70,35 @@ function foodmarket_start_session() {
 }
 
 // ============================================================
+// FIX: HENTIKAN WORDPRESS DARI MENGANGGAP "?s=" SEBAGAI is_search()
+// ============================================================
+// PENYEBAB REDIRECT LOOP SEBELUMNYA:
+// WordPress menandai is_search() = true SELAMA query var "s" ada di
+// URL — termasuk saat sudah berada di homepage. Jadi redirect ke
+// home_url('/?s=...') tetap dianggap is_search() oleh WordPress,
+// lalu redirect_search_to_home() jalan lagi tanpa henti (loop).
+//
+// SOLUSI: Matikan flag is_search secara paksa di awal request kalau
+// kita berada di halaman depan (front page), supaya WordPress
+// memuat front-page.php seperti biasa walau ada "?s=" di URL.
+// Logic pencarian sendiri tetap jalan manual lewat $_GET['s'] di
+// dalam front-page.php (tidak butuh WP_Query 's' bawaan WordPress).
+// ============================================================
+add_action( 'parse_query', 'foodmarket_force_front_page_on_search', 0 );
+function foodmarket_force_front_page_on_search( $query ) {
+    if ( ! is_admin() && $query->is_main_query() && isset( $_GET['s'] ) ) {
+        // Jika request ini sebenarnya menuju homepage (tidak ada path lain),
+        // paksa WordPress menganggapnya sebagai front page, bukan search.
+        $query->is_search = false;
+        $query->is_home   = true;
+        $query->set( 's', '' ); // kosongkan biar WP tidak ikut query 's' bawaan
+    }
+}
+
+// ============================================================
 // 6. HANDLER: TAMBAH PRODUK BARU
 // ============================================================
 add_action( 'admin_post_foodmarket_tambah_produk', 'foodmarket_handle_tambah_produk' );
-// nopriv tidak diperlukan — harus login untuk tambah produk
 function foodmarket_handle_tambah_produk() {
     if ( ! isset( $_POST['foodmarket_nonce'] )
         || ! wp_verify_nonce( $_POST['foodmarket_nonce'], 'foodmarket_tambah_produk_action' ) ) {
@@ -118,7 +142,6 @@ function foodmarket_handle_tambah_produk() {
     update_post_meta( $post_id, '_harga_produk', $harga );
     update_post_meta( $post_id, '_stok_produk',  $stok );
 
-    // Buat term kategori jika belum ada
     $term = get_term_by( 'slug', $kategori_slug, 'kategori_makanan' );
     if ( ! $term ) {
         $new_term = wp_insert_term(
@@ -274,6 +297,19 @@ function foodmarket_proses_checkout_handler() {
         exit;
     }
 
+    $cart_items = $_SESSION['foodmarket_cart'];
+
+    foreach ( $cart_items as $item ) {
+        $pid           = intval( $item['product_id'] );
+        $qty_beli      = intval( $item['quantity'] );
+        $stok_tersedia = intval( get_post_meta( $pid, '_stok_produk', true ) );
+
+        if ( $stok_tersedia < $qty_beli ) {
+            wp_redirect( home_url( '/checkout/?status=stok_kurang&produk=' . urlencode( get_the_title( $pid ) ) ) );
+            exit;
+        }
+    }
+
     $nama_penerima = sanitize_text_field(     $_POST['order_nama']       ?? '' );
     $no_hp         = sanitize_text_field(     $_POST['order_hp']         ?? '' );
     $metode_bayar  = sanitize_text_field(     $_POST['order_pembayaran'] ?? '' );
@@ -281,15 +317,14 @@ function foodmarket_proses_checkout_handler() {
     $current_buyer = wp_get_current_user();
 
     $invoice_number    = 'INV-' . date('Ymd') . '-' . strtoupper( wp_generate_password( 5, false, false ) );
-    $cart_items        = $_SESSION['foodmarket_cart'];
     $total_belanja     = 0;
     $ongkir            = 10000;
     $primary_seller_id = 0;
     $detail_items      = array();
 
     foreach ( $cart_items as $item ) {
-        $pid      = $item['product_id'];
-        $harga    = intval( get_post_meta( $pid, '_harga_produk', true ) );
+        $pid   = $item['product_id'];
+        $harga = intval( get_post_meta( $pid, '_harga_produk', true ) );
         $total_belanja += $harga * $item['quantity'];
 
         $seller_id = get_post_field( 'post_author', $pid );
@@ -322,7 +357,7 @@ function foodmarket_proses_checkout_handler() {
         wp_die( 'Gagal memproses pesanan.' );
     }
 
-    // Meta untuk checkout
+    update_post_meta( $order_id, '_status_order', 'pending_approval' );
     update_post_meta( $order_id, '_order_nama_penerima',  $nama_penerima );
     update_post_meta( $order_id, '_order_no_hp',          $no_hp );
     update_post_meta( $order_id, '_order_metode_bayar',   $metode_bayar );
@@ -330,7 +365,6 @@ function foodmarket_proses_checkout_handler() {
     update_post_meta( $order_id, '_order_total_harga',    $total_pembayaran );
     update_post_meta( $order_id, '_order_items_detail',   $detail_items );
 
-    // Meta yang dibaca oleh dashboard seller
     update_post_meta( $order_id, '_nama_pembeli', $nama_penerima );
     update_post_meta( $order_id, '_total_harga',  $total_pembayaran );
     update_post_meta( $order_id, '_seller_id',    $primary_seller_id );
@@ -338,13 +372,12 @@ function foodmarket_proses_checkout_handler() {
 
     unset( $_SESSION['foodmarket_cart'] );
 
-    wp_redirect( home_url( '/order-sukses/?invoice=' . $invoice_number ) );
+    wp_redirect( home_url( '/pembayaran-order/?order_id=' . $order_id ) );
     exit;
 }
 
 // ============================================================
-// 10. AJAX: CEK PESANAN BARU (POLLING NOTIFIKASI)
-// FIX: meta_query untuk admin dikembalikan array kosong, bukan string ""
+// 10. AJAX: CHECK NEW ORDERS
 // ============================================================
 add_action( 'wp_ajax_check_new_orders', 'foodmarket_check_new_orders' );
 function foodmarket_check_new_orders() {
@@ -360,7 +393,6 @@ function foodmarket_check_new_orders() {
         'post_status'    => array( 'publish', 'processing' ),
         'posts_per_page' => -1,
         'fields'         => 'ids',
-        // FIX: Jika admin, gunakan array kosong bukan string ""
         'meta_query'     => $is_admin ? array() : array(
             array(
                 'key'     => '_seller_id',
@@ -375,4 +407,152 @@ function foodmarket_check_new_orders() {
     wp_send_json_success( array(
         'count' => $order_query->found_posts,
     ) );
+}
+
+// ============================================================
+// 11. HANDLER: SELLER APPROVAL
+// ============================================================
+add_action( 'admin_post_foodmarket_seller_decision', 'foodmarket_handle_seller_decision' );
+function foodmarket_handle_seller_decision() {
+    if ( ! is_user_logged_in() ) {
+        wp_die( 'Anda harus login terlebih dahulu.' );
+    }
+
+    $current_user = wp_get_current_user();
+    if ( ! in_array( 'administrator', $current_user->roles ) && ! in_array( 'seller', $current_user->roles ) ) {
+        wp_die( 'Anda tidak memiliki hak untuk memproses pesanan ini.' );
+    }
+
+    $order_id = isset( $_POST['order_id'] ) ? intval( $_POST['order_id'] ) : 0;
+    $decision = isset( $_POST['seller_action'] ) ? sanitize_text_field( $_POST['seller_action'] ) : '';
+
+    if ( ! $order_id || ! $decision ) {
+        wp_die( 'Data transaksi tidak valid.' );
+    }
+
+    $detail_items = get_post_meta( $order_id, '_order_items_detail', true );
+
+    if ( $decision === 'approve' ) {
+
+        if ( is_array( $detail_items ) ) {
+            foreach ( $detail_items as $item ) {
+                $pid           = intval( $item['id_produk'] );
+                $qty_pesan     = intval( $item['quantity'] );
+                $stok_sekarang = intval( get_post_meta( $pid, '_stok_produk', true ) );
+
+                if ( $stok_sekarang < $qty_pesan ) {
+                    wp_die( 'Gagal Menyetujui! Stok untuk menu "' . get_the_title( $pid ) . '" saat ini tidak mencukupi.' );
+                }
+            }
+
+            foreach ( $detail_items as $item ) {
+                $pid           = intval( $item['id_produk'] );
+                $qty_pesan     = intval( $item['quantity'] );
+                $stok_sekarang = intval( get_post_meta( $pid, '_stok_produk', true ) );
+                $stok_baru     = max( 0, $stok_sekarang - $qty_pesan );
+                update_post_meta( $pid, '_stok_produk', $stok_baru );
+            }
+        }
+
+        update_post_meta( $order_id, '_status_order', 'waiting_payment' );
+
+    } elseif ( $decision === 'reject' ) {
+        update_post_meta( $order_id, '_status_order', 'rejected' );
+    }
+
+    wp_redirect( home_url('/dashboard-seller/?view=pesanan') );
+    exit;
+}
+
+// ============================================================
+// 12. REST API ENDPOINT: CEK STATUS ORDER
+// ============================================================
+add_action( 'rest_api_init', 'foodmarket_register_order_status_api' );
+function foodmarket_register_order_status_api() {
+    register_rest_route( 'foodmarket/v1', '/order-status/', array(
+        'methods'             => 'GET',
+        'callback'            => 'foodmarket_get_order_status_callback',
+        'permission_callback' => '__return_true',
+    ) );
+}
+
+function foodmarket_get_order_status_callback( $request ) {
+    $order_id = intval( $request->get_param( 'order_id' ) );
+    if ( ! $order_id || get_post_type( $order_id ) !== 'pesanan' ) {
+        return new WP_Error( 'no_order', 'Order tidak ditemukan', array( 'status' => 404 ) );
+    }
+
+    $status_order = get_post_meta( $order_id, '_status_order', true ) ?: 'pending_approval';
+
+    return array(
+        'order_id' => $order_id,
+        'status'   => $status_order,
+    );
+}
+
+// ============================================================
+// 13. HANDLER: UPLOAD BUKTI PEMBAYARAN
+// ============================================================
+add_action( 'admin_post_foodmarket_upload_bukti_bayar', 'foodmarket_handle_upload_bukti_bayar' );
+function foodmarket_handle_upload_bukti_bayar() {
+    if ( ! isset( $_POST['foodmarket_bukti_nonce'] ) || ! wp_verify_nonce( $_POST['foodmarket_bukti_nonce'], 'foodmarket_upload_bukti_action' ) ) {
+        wp_die( 'Akses ilegal.' );
+    }
+
+    $order_id = isset( $_POST['order_id'] ) ? intval( $_POST['order_id'] ) : 0;
+    if ( ! $order_id || get_post_type($order_id) !== 'pesanan' ) {
+        wp_die( 'Pesanan tidak valid.' );
+    }
+
+    if ( ! empty( $_FILES['bukti_transfer']['name'] ) ) {
+        require_once ABSPATH . 'wp-admin/includes/image.php';
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        require_once ABSPATH . 'wp-admin/includes/media.php';
+
+        $attachment_id = media_handle_upload( 'bukti_transfer', $order_id );
+
+        if ( ! is_wp_error( $attachment_id ) ) {
+            update_post_meta( $order_id, '_bukti_pembayaran_id', $attachment_id );
+            update_post_meta( $order_id, '_status_order', 'paid_processing' );
+
+            wp_redirect( home_url( '/upload-bukti/?order_id=' . $order_id . '&status=sukses' ) );
+            exit;
+        } else {
+            wp_die( 'Gagal mengunggah gambar bukti transfer: ' . $attachment_id->get_error_message() );
+        }
+    }
+
+    wp_die( 'Mohon pilih berkas bukti terlebih dahulu.' );
+}
+
+// ============================================================
+// 14. SYNC STATUS COMPLETED
+// ============================================================
+add_action( 'save_post_pesanan', 'foodmarket_sync_custom_status_completed_save', 10, 3 );
+function foodmarket_sync_custom_status_completed_save( $post_id, $post, $update ) {
+    if ( $post->post_status === 'completed' ) {
+        update_post_meta( $post_id, '_status_order', 'completed' );
+    }
+}
+
+add_action( 'init', 'foodmarket_handle_direct_complete_action' );
+function foodmarket_handle_direct_complete_action() {
+    if ( ! is_user_logged_in() || ! isset( $_GET['action'] ) || ! isset( $_GET['order_id'] ) ) {
+        return;
+    }
+
+    if ( $_GET['action'] === 'complete_order' && current_user_can( 'edit_posts' ) ) {
+        $order_id = intval( $_GET['order_id'] );
+
+        if ( get_post_type( $order_id ) === 'pesanan' ) {
+            update_post_meta( $order_id, '_status_order', 'completed' );
+            wp_update_post( array(
+                'ID'          => $order_id,
+                'post_status' => 'completed',
+            ) );
+
+            wp_redirect( home_url( '/dashboard-seller/?view=pesanan' ) );
+            exit;
+        }
+    }
 }
